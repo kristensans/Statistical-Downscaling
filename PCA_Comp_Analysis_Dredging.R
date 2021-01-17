@@ -200,10 +200,12 @@ clim_to_seasonal<-function(X,season='wet'){
 }
 
 composite<-function(y,x,xcrit,typ='>',outfile=NULL,is.sample=FALSE) {
-  # This functions takes vector x checks if values in X pass a threshold
+  # This functions takes vector x checks if values in x pass a threshold
   # xcrit and then selects the corresponding values from vector y
   # to calculate statistics.
-  # vector y the 
+  # vector y is a second vector with elements selected conditioned on
+  # the check where in vector x the threshold is passed.
+  # e.g. it could be a vector with dates, or an index counter.
   dim.y<-dim(y)
   inum<-length(x)
   if(dim.y[2]!=inum) {
@@ -297,17 +299,13 @@ my.proj<- function(field=NA,pattern=NA) {
 # (2.1) User defined parameters
 ###############################################################
 
-# OET: Comments /Question
-# Since dredge process is done down below in the script 
-# for once season and one selected PC mode
-# I wonder if we add the user-defined variable to 
-# set the PC mode that we analyze here already
-# is it variable pcamode? 
+ 
 
 ###############################################################
 # (2.1.1) User-controlled selections and options 
 ###############################################################
 season<-'dry'
+# years used for the calculations
 start_year=1980
 end_year=2007
 
@@ -316,8 +314,9 @@ end_year=2007
 # (2.1.2) User defined path names
 ###############################################################
 
-# OET 2020-12-17 Use of file.path() function that Kristen used
+# OET 2020-12-17 Use of file.path() 
 # to make path names independent of the OS
+
 
 datapath=file.path('C:','Users','timm','Documents','Github',
                    'Statistical-Downscaling_KS','Data')
@@ -389,9 +388,14 @@ region<-'HI'
 # (2.1.4) PCA analysis of rainfall (predictand)
 ###############################################################
 
-# PC time series used to form composites 
-# and used as predictand in regression model
-pcamode=4
+
+
+# select the PCA mode, i.e. the PC time series
+# to be used as predictand in the regression model
+# (pcamode <= pcamax)
+
+pcamode=3
+
 
 ###############################################################
 # (2.1.5) Composite analysis (applied to PC time series)
@@ -400,6 +404,16 @@ pcamode=4
 # choose the number of lowest ncomp and highest ncomp 
 # years to be used in anomaly composites
 ncomp<-4
+
+###############################################################
+# Dredge process (fiding the best model using AIC)
+###############################################################
+
+# select top ranking models passing the delta-AIC check
+# models from the dredge process to be passed through as
+# equivalently skillful models (delta<=delta_AIC_max)
+
+delta_AIC_max=2.0
 
 
 ###############################################################
@@ -445,15 +459,28 @@ Xmatrix<-as.matrix(X_nonas[,2:ncol])
 ###############################################################
 # (2.3) Run PCA on rainfall data (predictands) 
 ###############################################################
-#run PCA on the rainfall data and retain the 
+# run PCA on the rainfall data and retain the 
 # eigenvectors of the first 10 PCs
+# <OET 2021-01-17>
+# The highest PC time series used to form composites 
+# and used as predictand in regression model 
+# should can be increased if needed.
+# The number may depend on the season
+# (we used North Rule of Thumb to find number of PCA modes
+# to work with).
+# You must adjust the code before the dredge-function call.
+# If you want more PC modes define more GLM models 
+# in dredge-function (see variable res).
+#</OET>
+pca_max=4
 
 pr<-prcomp(Xmatrix,center=T,scale=T)
 
 # eigenvectors of the PCA (weight factors for the stations) 
 eigenvectors<-pr$rotation
 
-notScaled=eigenvectors[,1:10]
+# OET 2021-01-17 (not used elsewhere in this code)
+#notScaled=eigenvectors[,1:pcamax]
 
 ###############################################################
 #OET 2020-01-09 
@@ -497,9 +524,18 @@ iselect<-itime1:itime2
 
 
 # predictand time series
-
+# selects the PC time series used as predictand
+print(paste("PCA mode chosen as predictand: ",pcamode))
 y<-pc[,pcamode]
+
 iyrs<-length(y)
+if (pcamode>pca_max){
+  print("!!Warning: higher PCA modes should be considered with caution")
+  print(paste("Recommended maximum PCA modes to use:",pca_max))
+  print("!!No call model for dredge function defined.")
+  print("!!Code execution stopped.")
+  stop()
+}
 
 # array to store the projection index time series
 # for all climate variables (organized in columns)
@@ -657,75 +693,104 @@ write.csv(df,file.path(outputdir.train,filename), row.names=FALSE)
 # #wet season pc4
 # res<-glm(y~omega+ merid_transport700 + +hgt1000+ airdiff+ merid_trans925 + zonal_trans_925 + hgt500 + zonal_trans_700 + pottmp1000_850 + air2m + pr_wtr+ shum925 +shum700, df, family=gaussian, na.action = "na.fail")
 #wet season pc 1
-res<-glm(y~omega + merid_transport700 + hgt1000 
+
+# OET: make the selection dependent on the season and PC mode
+if (season =='wet'){
+  if (pcamode==1){
+    #wet season pc 2
+    res<-glm(y~omega + merid_transport700 + hgt1000 
          +merid_trans925 + zonal_trans_925
          + zonal_trans_700  + pottmp1000_850 + air2m, 
          df, family=gaussian, na.action = "na.fail")
-#wet season pc 2
-res<-glm(y~omega +merid_transport700 
+  }
+  if (pcamode==2){
+    #wet season pc 2
+    res<-glm(y~omega +merid_transport700 
            #+ airdiff 
            + merid_trans925 +zonal_trans_925 
          + hgt500 + zonal_trans_700 + pottmp1000_850 
          + skt +pr_wtr + shum925 + shum700, 
          df, family=gaussian, na.action = "na.fail")
-#wet season pc 3
-res<-glm(y~ omega + merid_transport700  
+  }
+  if (pcamode==3){
+    #wet season pc 3
+    res<-glm(y~ omega + merid_transport700  
            #+ airdiff 
            + zonal_trans_925 + hgt500 + zonal_trans_700 
          + pottmp1000_850 + air2m + shum925 + shum700, 
          df, family=gaussian, na.action = "na.fail")
-#wet season pc4
-res<-glm(y~omega+ merid_transport700 + hgt1000 
+  }
+  if (pcamode==4){
+    #wet season pc4
+    res<-glm(y~omega+ merid_transport700 + hgt1000 
            #+ airdiff 
            + merid_trans925 + zonal_trans_925 + 
            hgt500 + zonal_trans_700 + pottmp1000_850 + 
            air2m + pr_wtr+ shum925 +shum700, 
          df, family=gaussian, na.action = "na.fail")
+  }
+   
+} # end wet season
 
-# #dry season pc1
-# res<-glm(y~omega + merid_transport700 + slp + merid_trans925 + pottmp1000_500 + zonal_trans_925 + hgt500 + zonal_trans_700  + pottmp1000_850 +air2m + shum925 + shum700, df, family=gaussian, na.action = "na.fail")
-# #dry season pc2
-# res<-glm(y~omega + merid_transport700 +hgt1000 + airdiff + merid_trans925 + zonal_trans_925 + hgt500 + zonal_trans_700  + pottmp1000_850 + skt + pr_wtr + shum925 + shum700, df, family=gaussian, na.action = "na.fail")
-# #dry season pc3
-# res<-glm(y~omega + merid_transport700 + slp + airdiff + merid_trans925 + zonal_trans_925 + hgt500 + zonal_trans_700 + pottmp1000_850 + air2m + pr_wtr + shum925 + shum700, df, family=gaussian, na.action = "na.fail")
-# #dry season pc4
-# res<-glm(y~omega + merid_transport700 + hgt1000 + airdiff + merid_trans925 + zonal_trans_925 + hgt500 + zonal_trans_700  + pottmp1000_850 + air2m  + pr_wtr + shum925 + shum700, df, family=gaussian, na.action = "na.fail")
+if (season=="dry"){
+  # #dry season pc1
+  # res<-glm(y~omega + merid_transport700 + slp + merid_trans925 + pottmp1000_500 + zonal_trans_925 + hgt500 + zonal_trans_700  + pottmp1000_850 +air2m + shum925 + shum700, df, family=gaussian, na.action = "na.fail")
+  # #dry season pc2
+  # res<-glm(y~omega + merid_transport700 +hgt1000 + airdiff + merid_trans925 + zonal_trans_925 + hgt500 + zonal_trans_700  + pottmp1000_850 + skt + pr_wtr + shum925 + shum700, df, family=gaussian, na.action = "na.fail")
+  # #dry season pc3
+  # res<-glm(y~omega + merid_transport700 + slp + airdiff + merid_trans925 + zonal_trans_925 + hgt500 + zonal_trans_700 + pottmp1000_850 + air2m + pr_wtr + shum925 + shum700, df, family=gaussian, na.action = "na.fail")
+  # #dry season pc4
+  # res<-glm(y~omega + merid_transport700 + hgt1000 + airdiff + merid_trans925 + zonal_trans_925 + hgt500 + zonal_trans_700  + pottmp1000_850 + air2m  + pr_wtr + shum925 + shum700, df, family=gaussian, na.action = "na.fail")
 
-# #dry season pc1
-res<-glm(y~omega + merid_transport700 + slp 
+  if (pcamode==1){
+    #dry season pc1
+    res<-glm(y~omega + merid_transport700 + slp 
          + merid_trans925 + pottmp1000_500 
          + zonal_trans_925 + hgt500 
          + zonal_trans_700  + pottmp1000_850 
          +air2m + shum925 + shum700, 
          df, family=gaussian, na.action = "na.fail")
-# #dry season pc2
-res<-glm(y~omega + merid_transport700 
+  }
+  if (pcamode==2){
+    # #dry season pc2
+    res<-glm(y~omega + merid_transport700 
          +hgt1000 
          #+ airdiff 
          + merid_trans925 + zonal_trans_925 
          + hgt500 + zonal_trans_700  + pottmp1000_850 
          + skt + pr_wtr + shum925 + shum700, 
          df, family=gaussian, na.action = "na.fail")
-# #dry season pc3
-res<-glm(y~omega + merid_transport700 + slp 
+  }
+  if (pcamode==3){
+    #dry season pc3
+    res<-glm(y~omega + merid_transport700 + slp 
          #+ airdiff 
          + merid_trans925 + zonal_trans_925 + hgt500 
          + zonal_trans_700 + pottmp1000_850 + air2m 
          + pr_wtr + shum925 + shum700, 
          df, family=gaussian, na.action = "na.fail")
-# #dry season pc4
-res<-glm(y~omega + merid_transport700 + hgt1000 
+  }
+  if (pcamode==4){
+    # #dry season pc4
+    res<-glm(y~omega + merid_transport700 + hgt1000 
          #+ airdiff 
          + merid_trans925 + zonal_trans_925 
          + hgt500 + zonal_trans_700  + pottmp1000_850 
          + air2m  + pr_wtr + shum925 + shum700, 
          df, family=gaussian, na.action = "na.fail")
+  }
+}
+print(paste("Dredge model call for season ",
+            season," PC #",pcamode,sep=""))
+print(res$call)
 #</OET>
 
 
 ####################################################################################
 #all possible models
+print("execute dredge-function ...")
 dredge=dredge(res, rank = "AICc",extra="R^2")
+print("... done.")
 #save the dredge table to directory each time (change season name and pc number)
 filename=paste(season,"_PC",pcamode,"_dredge.csv",sep="")
 print("write predictand and predictor data table:")
@@ -737,10 +802,9 @@ if (!dir.exists(dhelp)){
   print(dhelp)
 }
 print(file.path(dhelp,filename))
-# OET write just the top ten models to output
-# 
-dredge_ret=10
-write.csv(dredge[1:dredge_ret,],file.path(dhelp,filename), row.names = FALSE)
+
+ipass=dredge$delta<=delta_AIC_max
+write.csv(dredge[ipass,],file.path(dhelp,filename), row.names = FALSE)
 
 
 
